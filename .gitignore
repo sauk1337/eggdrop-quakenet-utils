@@ -1,0 +1,30 @@
+# Secrets and personal configs
+control.conf
+secrets.tcl
+
+# Eggdrop runtime files
+*.user
+*.user~*
+*.chan
+*.chan~*
+*.notes
+pid.*
+logs/
+*.log
+
+# Data written by the scripts
+antiproxy/
+chanstats/
+reminders/
+feeds/
+github/
+countdown/
+utils/
+seen.db
+*.tmp
+
+# Editors / OS
+*.swp
+*~
+.DS_Store
+Thumbs.db
