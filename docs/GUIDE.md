@@ -67,7 +67,7 @@ Checks the IP of everyone who joins and kickbans proxies, VPN abuse and Tor.
 | Command | Who | |
 |---|---|---|
 | `/msg <bot> enter #chan` | everyone | Ask for an invite on a gate channel |
-| `!pcheck <ip\|host\|nick>` | ops | Check by hand and show the score |
+| `!pcheck <ip\|host\|nick>` | ops | Check by hand and show the score. A nick on a `+antiproxy` channel is also kickbanned if detected (users authed with Q are only reported). |
 
 **How it decides.** Each method adds points. At 3 points (`threshold`) the bot acts.
 

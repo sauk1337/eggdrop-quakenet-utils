@@ -1,5 +1,5 @@
 # =====================================================================
-#  web.tcl  v1.1.0  -  Shared HTTP, JSON and text helpers (library)
+#  web.tcl  v1.2.2  -  Shared HTTP, JSON and text helpers (library)
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -14,7 +14,7 @@
 #    Load it before every script that uses it.
 #
 #  API
-#    ::web::get url callback ?headers?
+#    ::web::get url callback ?headers? ?timeout_ms?
 #        GET, follows redirects:  {*}$callback ok code body  (ok = HTTP 200)
 #    ::web::fetch url callback ?headers?
 #        same, raw bytes + headers:  {*}$callback ok code body meta
@@ -26,7 +26,10 @@
 #    ::web::query k v ...       URL-encoded query string
 #    ::web::unhtml s | ::web::entities s | ::web::trim s n
 #    ::web::throttle key secs   1 if the key was used less than secs ago
-#    ::web::say target text     PRIVMSG (or "notice:nick"), split at 400 bytes
+#    ::web::say target text ?queue?
+#        PRIVMSG (or "notice:nick"), split at 400 bytes. queue: help
+#        (default, slowest), serv, quick, or now (sent at once, for a
+#        short answer someone is waiting for)
 #
 #  OUTPUT STYLE (shared by every script, so the bot looks the same everywhere)
 #    YouTube :: Title (Channel: x | Views: 6.7M | Likes: 36K)
@@ -104,8 +107,8 @@ if {[catch {package require tls}]} {
     ::http::register https 443 ::tls::socket
 }
 
-proc ::web::get {url callback {headers {}}} {
-    request GET $url "" $callback $headers 0 0
+proc ::web::get {url callback {headers {}} {timeout 0}} {
+    request GET $url "" $callback $headers $timeout 0
 }
 
 # Like get, but the callback also receives the response headers:
@@ -203,23 +206,52 @@ proc ::web::ascii {text} {
         \u2009 " " \u200b "" \u2122 (TM)] $text
 }
 
+# putnow skips Eggdrop's flood control, so it is capped here: at most
+# now_burst lines every now_window seconds, the rest go by putquick.
+namespace eval ::web {
+    variable now_burst 4
+    variable now_window 4
+    variable now_sent {}
+}
+proc ::web::putnow {line} {
+    variable now_burst
+    variable now_window
+    variable now_sent
+    set t [clock seconds]
+    set keep {}
+    foreach s $now_sent {if {$t - $s < $now_window} {lappend keep $s}}
+    set now_sent $keep
+    if {[info commands ::putnow] ne "" && [llength $now_sent] < $now_burst} {
+        lappend now_sent $t
+        ::putnow $line
+    } else {
+        putquick $line
+    }
+}
+
 # Sends text to a channel or nick; "notice:nick" sends a NOTICE.
 # Long text is split on spaces at ~400 bytes (IRC line limit).
-proc ::web::say {target text} {
+proc ::web::say {target text {queue help}} {
     set cmd PRIVMSG
     if {[string match notice:* $target]} {
         set cmd NOTICE
         set target [string range $target 7 end]
+    }
+    switch -- $queue {
+        now     {set put ::web::putnow}
+        quick   {set put putquick}
+        serv    {set put putserv}
+        default {set put puthelp}
     }
     regsub -all {[\r\n]+} $text " " text
     set text [ascii $text]
     while {[string length $text] > 400} {
         set cut [string last " " $text 400]
         if {$cut < 100} {set cut 400}
-        puthelp "$cmd $target :[string range $text 0 [expr {$cut - 1}]]"
+        $put "$cmd $target :[string range $text 0 [expr {$cut - 1}]]"
         set text [string trimleft [string range $text $cut end]]
     }
-    if {$text ne ""} {puthelp "$cmd $target :$text"}
+    if {$text ne ""} {$put "$cmd $target :$text"}
 }
 
 # ----------------------------- JSON -----------------------------

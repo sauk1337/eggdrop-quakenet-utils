@@ -1,5 +1,5 @@
 # =====================================================================
-#  antiproxy.tcl  v1.2.0  -  Proxy / VPN / Tor detection on join
+#  antiproxy.tcl  v1.2.2  -  Proxy / VPN / Tor detection on join
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -26,8 +26,8 @@
 #      any IP flagged as a real proxy / Tor / DNSBL   3+        kickban
 #
 #  REQUIREMENTS
-#    web.tcl loaded before (output style)
 #    tcl-tls for HTTPS (proxycheck.io and the Tor list)
+#    Works on its own; with web.tcl loaded it shares its colours.
 #
 #  SETUP
 #    .chanset #chan +antiproxy         check on join: kickban | kick | warn
@@ -36,12 +36,41 @@
 #
 #  COMMANDS
 #    /msg <bot> enter #chan            ask for an invite (gate channels)
-#    !pcheck <ip|host|nick>            check by hand (ops)
+#    !pcheck <ip|host|nick>            check by hand (ops). A nick on a
+#                                      +antiproxy channel is also kickbanned
+#                                      if detected (unless authed with Q)
 #  PARTYLINE
 #    .pcheck <ip|host|nick>  .pwhite add|del|list [mask]  .pcache [clear]  .pstats
 # =====================================================================
 
 package require http
+
+# Output style. web.tcl provides it; when this script runs on its own,
+# a minimal copy of the same helpers is defined here. If web.tcl is
+# loaded later, it simply replaces them.
+if {[info commands ::web::line] eq ""} {
+    namespace eval ::web {
+        variable style
+        if {![array exists style]} {array set style {tag 07 label 12 sep 07 dim 14}}
+    }
+    proc ::web::tag {name} {return "\003$::web::style(tag)\002$name\002\003"}
+    proc ::web::b {text} {return "\002$text\002"}
+    proc ::web::lbl {label value} {return "\003$::web::style(label)$label:\003 $value"}
+    proc ::web::sep {} {return " \003$::web::style(sep)|\003 "}
+    proc ::web::dim {text} {return "\003$::web::style(dim)$text\003"}
+    proc ::web::fields {list} {
+        set keep {}
+        foreach f $list {if {$f ne ""} {lappend keep $f}}
+        return [join $keep [sep]]
+    }
+    proc ::web::line {tag title {fields {}}} {
+        set out "[tag $tag] :: [b $title]"
+        set f [fields $fields]
+        if {$f ne ""} {append out " ($f)"}
+        return $out
+    }
+    proc ::web::msg {tag text} {return "[tag $tag] :: $text"}
+}
 
 namespace eval ::antiproxy {
     # ------------------------- CONFIGURATION -------------------------
@@ -742,7 +771,7 @@ proc ::antiproxy::act_bad_now {c} {
                 return
             }
             if {$action eq "warn" || ![botisop $chan]} {
-                set extra [expr {[botisop $chan] ? "" : ", I'm not opped"}]
+                set extra [expr {[botisop $chan] ? ", not acting (action is warn)" : ", I'm not opped"}]
                 log "[::web::b Detected] $who on $chan$extra ($info)"
                 return
             }
@@ -760,6 +789,12 @@ proc ::antiproxy::act_bad_now {c} {
         }
         manual {
             reply $reply [::web::line Antiproxy "$nick: proxy detected" [list $info]]
+            # !pcheck on someone who is on a +antiproxy channel: same
+            # action as on join (Q-authed users are still let through)
+            if {$chan ne "" && [validchan $chan] && [channel get $chan antiproxy] && [onchan $nick $chan]} {
+                dict set c mode join
+                act_bad $c
+            }
         }
     }
 }
@@ -829,10 +864,15 @@ proc ::antiproxy::msg_gate {nick uhost hand text} {
     return 1
 }
 
-proc ::antiproxy::manual {target to} {
-    set uh [getchanhost $target]
-    if {$uh eq ""} {set uh "*@$target"}
-    check manual $target $uh "" $to
+# chan: the channel where !pcheck was used ("" from the partyline)
+proc ::antiproxy::manual {target to {chan ""}} {
+    set uh [expr {$chan ne "" ? [getchanhost $target $chan] : ""}]
+    if {$uh eq ""} {set uh [getchanhost $target]}
+    if {$uh eq ""} {
+        set uh "*@$target"
+        set chan ""
+    }
+    check manual $target $uh $chan $to
 }
 
 bind dcc o pcheck ::antiproxy::dcc_check
@@ -854,7 +894,7 @@ proc ::antiproxy::pub_check {nick uhost hand chan text} {
         puthelp "NOTICE $nick :Usage: !pcheck <ip|host|nick>"
         return 0
     }
-    manual $t [list chan $chan]
+    manual $t [list chan $chan] $chan
     return 1
 }
 

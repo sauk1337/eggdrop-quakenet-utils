@@ -38,7 +38,7 @@ namespace eval ::help {
     variable catalog {
         antiproxy ::antiproxy {antiproxy antiproxy-gate} "Proxy/VPN/Tor check on join; +i gate with invites" {
             {"/msg $bot enter #chan" - "get invited after an IP check (gate channels)"}
-            {"!pcheck <ip|nick>" o "check an IP by hand"}
+            {"!pcheck <ip|nick>" o "check by hand; a detected nick on the channel is kickbanned"}
         }
         ipinfo ::ipinfo {ipinfo} "Full IP lookup: location, network, abuse contact, proxy/VPN/Tor verdict" {
             {"!ip <ip|host>" - "IP information"}
@@ -123,7 +123,7 @@ namespace eval ::help {
     # single-file build. Plain ASCII, 72 columns.
     variable guide {
 +----------------------------------------------------------------------+
-|                    eggdrop-quakenet-utils  v1.2.1                    |
+|                    eggdrop-quakenet-utils  v1.2.2                    |
 |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 +----------------------------------------------------------------------+
 

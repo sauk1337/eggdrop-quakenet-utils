@@ -1,5 +1,5 @@
 ########################################################################
-#  eggdrop-quakenet-utils.tcl  v1.2.1  -  every script in one file
+#  eggdrop-quakenet-utils.tcl  v1.2.2  -  every script in one file
 ########################################################################
 #
 #  GENERATED FILE: edit the scripts in scripts/ and run
@@ -14,7 +14,7 @@
 #  License: MIT (see LICENSE).
 #
 #  +----------------------------------------------------------------------+
-#  |                    eggdrop-quakenet-utils  v1.2.1                    |
+#  |                    eggdrop-quakenet-utils  v1.2.2                    |
 #  |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 #  +----------------------------------------------------------------------+
 #
@@ -97,7 +97,7 @@
 ########################################################################
 
 # =====================================================================
-#  web.tcl  v1.1.0  -  Shared HTTP, JSON and text helpers (library)
+#  web.tcl  v1.2.2  -  Shared HTTP, JSON and text helpers (library)
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -112,7 +112,7 @@
 #    Load it before every script that uses it.
 #
 #  API
-#    ::web::get url callback ?headers?
+#    ::web::get url callback ?headers? ?timeout_ms?
 #        GET, follows redirects:  {*}$callback ok code body  (ok = HTTP 200)
 #    ::web::fetch url callback ?headers?
 #        same, raw bytes + headers:  {*}$callback ok code body meta
@@ -124,7 +124,10 @@
 #    ::web::query k v ...       URL-encoded query string
 #    ::web::unhtml s | ::web::entities s | ::web::trim s n
 #    ::web::throttle key secs   1 if the key was used less than secs ago
-#    ::web::say target text     PRIVMSG (or "notice:nick"), split at 400 bytes
+#    ::web::say target text ?queue?
+#        PRIVMSG (or "notice:nick"), split at 400 bytes. queue: help
+#        (default, slowest), serv, quick, or now (sent at once, for a
+#        short answer someone is waiting for)
 #
 #  OUTPUT STYLE (shared by every script, so the bot looks the same everywhere)
 #    YouTube :: Title (Channel: x | Views: 6.7M | Likes: 36K)
@@ -202,8 +205,8 @@ if {[catch {package require tls}]} {
     ::http::register https 443 ::tls::socket
 }
 
-proc ::web::get {url callback {headers {}}} {
-    request GET $url "" $callback $headers 0 0
+proc ::web::get {url callback {headers {}} {timeout 0}} {
+    request GET $url "" $callback $headers $timeout 0
 }
 
 # Like get, but the callback also receives the response headers:
@@ -301,23 +304,52 @@ proc ::web::ascii {text} {
         \u2009 " " \u200b "" \u2122 (TM)] $text
 }
 
+# putnow skips Eggdrop's flood control, so it is capped here: at most
+# now_burst lines every now_window seconds, the rest go by putquick.
+namespace eval ::web {
+    variable now_burst 4
+    variable now_window 4
+    variable now_sent {}
+}
+proc ::web::putnow {line} {
+    variable now_burst
+    variable now_window
+    variable now_sent
+    set t [clock seconds]
+    set keep {}
+    foreach s $now_sent {if {$t - $s < $now_window} {lappend keep $s}}
+    set now_sent $keep
+    if {[info commands ::putnow] ne "" && [llength $now_sent] < $now_burst} {
+        lappend now_sent $t
+        ::putnow $line
+    } else {
+        putquick $line
+    }
+}
+
 # Sends text to a channel or nick; "notice:nick" sends a NOTICE.
 # Long text is split on spaces at ~400 bytes (IRC line limit).
-proc ::web::say {target text} {
+proc ::web::say {target text {queue help}} {
     set cmd PRIVMSG
     if {[string match notice:* $target]} {
         set cmd NOTICE
         set target [string range $target 7 end]
+    }
+    switch -- $queue {
+        now     {set put ::web::putnow}
+        quick   {set put putquick}
+        serv    {set put putserv}
+        default {set put puthelp}
     }
     regsub -all {[\r\n]+} $text " " text
     set text [ascii $text]
     while {[string length $text] > 400} {
         set cut [string last " " $text 400]
         if {$cut < 100} {set cut 400}
-        puthelp "$cmd $target :[string range $text 0 [expr {$cut - 1}]]"
+        $put "$cmd $target :[string range $text 0 [expr {$cut - 1}]]"
         set text [string trimleft [string range $text $cut end]]
     }
-    if {$text ne ""} {puthelp "$cmd $target :$text"}
+    if {$text ne ""} {$put "$cmd $target :$text"}
 }
 
 # ----------------------------- JSON -----------------------------
@@ -979,7 +1011,7 @@ putlog "qauth.tcl loaded (CHALLENGEAUTH [expr {$::qauth::sha ? "HMAC-SHA256" : "
 ########################################################################
 
 # =====================================================================
-#  antiproxy.tcl  v1.2.0  -  Proxy / VPN / Tor detection on join
+#  antiproxy.tcl  v1.2.2  -  Proxy / VPN / Tor detection on join
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -1006,8 +1038,8 @@ putlog "qauth.tcl loaded (CHALLENGEAUTH [expr {$::qauth::sha ? "HMAC-SHA256" : "
 #      any IP flagged as a real proxy / Tor / DNSBL   3+        kickban
 #
 #  REQUIREMENTS
-#    web.tcl loaded before (output style)
 #    tcl-tls for HTTPS (proxycheck.io and the Tor list)
+#    Works on its own; with web.tcl loaded it shares its colours.
 #
 #  SETUP
 #    .chanset #chan +antiproxy         check on join: kickban | kick | warn
@@ -1016,12 +1048,41 @@ putlog "qauth.tcl loaded (CHALLENGEAUTH [expr {$::qauth::sha ? "HMAC-SHA256" : "
 #
 #  COMMANDS
 #    /msg <bot> enter #chan            ask for an invite (gate channels)
-#    !pcheck <ip|host|nick>            check by hand (ops)
+#    !pcheck <ip|host|nick>            check by hand (ops). A nick on a
+#                                      +antiproxy channel is also kickbanned
+#                                      if detected (unless authed with Q)
 #  PARTYLINE
 #    .pcheck <ip|host|nick>  .pwhite add|del|list [mask]  .pcache [clear]  .pstats
 # =====================================================================
 
 package require http
+
+# Output style. web.tcl provides it; when this script runs on its own,
+# a minimal copy of the same helpers is defined here. If web.tcl is
+# loaded later, it simply replaces them.
+if {[info commands ::web::line] eq ""} {
+    namespace eval ::web {
+        variable style
+        if {![array exists style]} {array set style {tag 07 label 12 sep 07 dim 14}}
+    }
+    proc ::web::tag {name} {return "\003$::web::style(tag)\002$name\002\003"}
+    proc ::web::b {text} {return "\002$text\002"}
+    proc ::web::lbl {label value} {return "\003$::web::style(label)$label:\003 $value"}
+    proc ::web::sep {} {return " \003$::web::style(sep)|\003 "}
+    proc ::web::dim {text} {return "\003$::web::style(dim)$text\003"}
+    proc ::web::fields {list} {
+        set keep {}
+        foreach f $list {if {$f ne ""} {lappend keep $f}}
+        return [join $keep [sep]]
+    }
+    proc ::web::line {tag title {fields {}}} {
+        set out "[tag $tag] :: [b $title]"
+        set f [fields $fields]
+        if {$f ne ""} {append out " ($f)"}
+        return $out
+    }
+    proc ::web::msg {tag text} {return "[tag $tag] :: $text"}
+}
 
 namespace eval ::antiproxy {
     # ------------------------- CONFIGURATION -------------------------
@@ -1722,7 +1783,7 @@ proc ::antiproxy::act_bad_now {c} {
                 return
             }
             if {$action eq "warn" || ![botisop $chan]} {
-                set extra [expr {[botisop $chan] ? "" : ", I'm not opped"}]
+                set extra [expr {[botisop $chan] ? ", not acting (action is warn)" : ", I'm not opped"}]
                 log "[::web::b Detected] $who on $chan$extra ($info)"
                 return
             }
@@ -1740,6 +1801,12 @@ proc ::antiproxy::act_bad_now {c} {
         }
         manual {
             reply $reply [::web::line Antiproxy "$nick: proxy detected" [list $info]]
+            # !pcheck on someone who is on a +antiproxy channel: same
+            # action as on join (Q-authed users are still let through)
+            if {$chan ne "" && [validchan $chan] && [channel get $chan antiproxy] && [onchan $nick $chan]} {
+                dict set c mode join
+                act_bad $c
+            }
         }
     }
 }
@@ -1809,10 +1876,15 @@ proc ::antiproxy::msg_gate {nick uhost hand text} {
     return 1
 }
 
-proc ::antiproxy::manual {target to} {
-    set uh [getchanhost $target]
-    if {$uh eq ""} {set uh "*@$target"}
-    check manual $target $uh "" $to
+# chan: the channel where !pcheck was used ("" from the partyline)
+proc ::antiproxy::manual {target to {chan ""}} {
+    set uh [expr {$chan ne "" ? [getchanhost $target $chan] : ""}]
+    if {$uh eq ""} {set uh [getchanhost $target]}
+    if {$uh eq ""} {
+        set uh "*@$target"
+        set chan ""
+    }
+    check manual $target $uh $chan $to
 }
 
 bind dcc o pcheck ::antiproxy::dcc_check
@@ -1834,7 +1906,7 @@ proc ::antiproxy::pub_check {nick uhost hand chan text} {
         puthelp "NOTICE $nick :Usage: !pcheck <ip|host|nick>"
         return 0
     }
-    manual $t [list chan $chan]
+    manual $t [list chan $chan] $chan
     return 1
 }
 
@@ -2203,7 +2275,7 @@ putlog "tools.tcl loaded (op commands, !seen, greeting)"
 ########################################################################
 
 # =====================================================================
-#  ipinfo.tcl  v1.2.0  -  Full IP lookup
+#  ipinfo.tcl  v1.2.2  -  Full IP lookup
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -2237,7 +2309,9 @@ namespace eval ::ipinfo {
     variable pub_flags "-|-"         ;# who can use !ip on IPs/hostnames
     variable nick_flags "o|o"        ;# who can look up nicks
     variable throttle 8              ;# seconds between lookups per user
-    variable timeout 15              ;# seconds before printing what we have
+    variable timeout 6               ;# seconds before printing what we have
+    variable http_timeout 5          ;# seconds per web request
+    variable queue now               ;# now = answer at once, help = slow queue
     variable proxycheck_key ""       ;# empty = reuse antiproxy's key if loaded
     variable dnsbls {
         dnsbl.dronebl.org
@@ -2313,7 +2387,7 @@ proc ::ipinfo::lookup {target reply requester} {
     variable seq
     variable req
     set id [incr seq]
-    set req($id) [dict create target $target reply $reply pending 0 dnsbl {}]
+    set req($id) [dict create target $target reply $reply sent 0 wait {} dnsbl {}]
 
     if {[is_ip $target]} {
         start $id $target ""
@@ -2408,37 +2482,39 @@ proc ::ipinfo::start {id ip host} {
         finish $id 1
         return
     }
+    variable http_timeout
     utimer $timeout [list ::ipinfo::finish $id]
-    dict set req($id) pending 1
+    set ms [expr {$http_timeout * 1000}]
+    set rev [rev_ip $ip]
+
+    # Every source is registered before any is started, so an answer that
+    # comes back at once can't print a line before the others are known.
+    set sources {ipapi pc rdap}
+    foreach zone $dnsbls {lappend sources dnsbl:$zone}
+    if {$host eq ""} {lappend sources rdns}
+    dict set req($id) wait $sources
 
     # ip-api.com: location, ASN, ISP, flags (free, HTTP only, 45/min)
-    pending $id
     ::web::get "http://ip-api.com/json/$ip?fields=status,message,continent,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting" \
-        [list ::ipinfo::got_ipapi $id]
+        [list ::ipinfo::got_ipapi $id] {} $ms
 
     # proxycheck.io v2: proxy/VPN type, risk score, provider
     set key [proxycheck_key]
     set url "https://proxycheck.io/v2/$ip?vpn=1&asn=1&risk=1"
     if {$key ne ""} {append url "&key=$key"}
-    pending $id
-    ::web::get $url [list ::ipinfo::got_proxycheck $id]
+    ::web::get $url [list ::ipinfo::got_proxycheck $id] {} $ms
 
     # RDAP: registered network, range, country and abuse contact
-    pending $id
-    ::web::get "https://rdap.org/ip/$ip" [list ::ipinfo::got_rdap $id] {Accept application/rdap+json}
+    ::web::get "https://rdap.org/ip/$ip" [list ::ipinfo::got_rdap $id] {Accept application/rdap+json} $ms
 
     # DNSBLs
-    set rev [rev_ip $ip]
     foreach zone $dnsbls {
-        pending $id
         dnslookup "$rev.$zone" ::ipinfo::got_dnsbl $id $zone
     }
     # Reverse DNS (ip-api also gives one, ours is authoritative)
     if {$host eq ""} {
-        pending $id
         dnslookup $ip ::ipinfo::got_rdns $id
     }
-    done $id
 }
 
 proc ::ipinfo::proxycheck_key {} {
@@ -2449,23 +2525,51 @@ proc ::ipinfo::proxycheck_key {} {
     return $proxycheck_key
 }
 
-proc ::ipinfo::pending {id} {
-    variable req
-    dict incr req($id) pending
-}
-
-proc ::ipinfo::done {id} {
+# A source has answered (or failed): print every line that is now ready
+proc ::ipinfo::done {id src} {
     variable req
     if {![info exists req($id)]} return
-    dict incr req($id) pending -1
-    if {[dict get $req($id) pending] <= 0} {finish $id}
+    set w [dict get $req($id) wait]
+    dict set req($id) wait [lsearch -all -inline -not -exact $w $src]
+    flush $id 0
+}
+
+# Sources each line needs. Lines go out in order, each as soon as its
+# sources are in, so the first one shows up after ~1 second instead of
+# waiting for the slowest service.
+proc ::ipinfo::needs {line} {
+    switch -- $line {
+        1 {return {ipapi rdns}}
+        2 {return {ipapi pc rdap}}
+        3 {return {pc dnsbl:*}}
+    }
+}
+
+proc ::ipinfo::ready {id line} {
+    variable req
+    set w [dict get $req($id) wait]
+    foreach n [needs $line] {
+        if {[lsearch -glob $w $n] >= 0} {return 0}
+    }
+    return 1
+}
+
+proc ::ipinfo::flush {id force} {
+    variable req
+    while {[info exists req($id)]} {
+        set line [expr {[dict get $req($id) sent] + 1}]
+        if {!$force && ![ready $id $line]} return
+        dict set req($id) sent $line
+        line$line $id
+        if {$line == 3} {unset req($id)}
+    }
 }
 
 proc ::ipinfo::got_ipapi {id ok code body} {
     if {$ok && ![catch {::web::json $body} d] && [::web::dget $d status] eq "success"} {
         set_field $id ipapi $d
     }
-    done $id
+    done $id ipapi
 }
 
 proc ::ipinfo::got_proxycheck {id ok code body} {
@@ -2473,7 +2577,7 @@ proc ::ipinfo::got_proxycheck {id ok code body} {
         set ip [field $id ip]
         if {[dict exists $d $ip]} {set_field $id pc [dict get $d $ip]}
     }
-    done $id
+    done $id pc
 }
 
 proc ::ipinfo::got_rdap {id ok code body} {
@@ -2491,7 +2595,7 @@ proc ::ipinfo::got_rdap {id ok code body} {
         set_field $id rdap [dict create name $net range [join $range ", "] \
             country [::web::dget $d country] abuse [abuse_email [::web::dget $d entities]]]
     }
-    done $id
+    done $id rdap
 }
 
 # Looks for an entity with role "abuse" (recursively) and returns its email
@@ -2514,12 +2618,12 @@ proc ::ipinfo::got_dnsbl {ip host status id zone} {
     if {$status && [string match 127.* $ip]} {
         dict lappend req($id) dnsbl "$zone ($ip)"
     }
-    done $id
+    done $id dnsbl:$zone
 }
 
 proc ::ipinfo::got_rdns {ip host status id} {
     if {$status && $host ne "" && $host ne $ip} {set_field $id host $host}
-    done $id
+    done $id rdns
 }
 
 # ------------------------------ OUTPUT ------------------------------
@@ -2530,12 +2634,13 @@ proc ::ipinfo::reply {id text} {
         set idx [string range $to 4 end]
         if {[valididx $idx]} {putdcc $idx [stripcodes bcruag $text]}
     } else {
-        ::web::say $to $text
+        ::web::say $to $text $::ipinfo::queue
     }
 }
 
 proc ::ipinfo::yn {v} {expr {$v eq "1" ? "yes" : "no"}}
 
+# Timeout (or quiet = nothing more to say): print whatever is missing
 proc ::ipinfo::finish {id {quiet 0}} {
     variable req
     if {![info exists req($id)]} return
@@ -2543,12 +2648,22 @@ proc ::ipinfo::finish {id {quiet 0}} {
         unset req($id)
         return
     }
-    set r $req($id)
+    flush $id 1
+}
 
+proc ::ipinfo::data {id} {
+    variable req
+    set r $req($id)
+    foreach k {ipapi pc rdap} {
+        if {![dict exists $r $k]} {dict set r $k {}}
+    }
+    return $r
+}
+
+proc ::ipinfo::line1 {id} {
+    set r [data $id]
     set ip [dict get $r ip]
-    set ia [expr {[dict exists $r ipapi] ? [dict get $r ipapi] : {}}]
-    set pc [expr {[dict exists $r pc] ? [dict get $r pc] : {}}]
-    set rd [expr {[dict exists $r rdap] ? [dict get $r rdap] : {}}]
+    set ia [dict get $r ipapi]
     set host [expr {[dict exists $r host] ? [dict get $r host] : [::web::dget $ia reverse]}]
 
     # Line 1: identity and location
@@ -2567,6 +2682,13 @@ proc ::ipinfo::finish {id {quiet 0}} {
         }
     }
     reply $id [::web::line IP $ip $f]
+}
+
+proc ::ipinfo::line2 {id} {
+    set r [data $id]
+    set ia [dict get $r ipapi]
+    set pc [dict get $r pc]
+    set rd [dict get $r rdap]
 
     # Line 2: network
     #   Network :: ASN: x | ISP: y | RDAP: name range (cc) | Abuse: mail
@@ -2583,6 +2705,13 @@ proc ::ipinfo::finish {id {quiet 0}} {
         if {[dict get $rd abuse] ne ""} {lappend parts [::web::lbl Abuse [dict get $rd abuse]]}
     }
     if {[llength $parts]} {reply $id [::web::msg Network [::web::fields $parts]]}
+}
+
+proc ::ipinfo::line3 {id} {
+    set r [data $id]
+    set ip [dict get $r ip]
+    set ia [dict get $r ipapi]
+    set pc [dict get $r pc]
 
     # Line 3: security
     #   Security :: CLEAN (proxycheck: ... | ip-api: ... | Tor exit: no | DNSBL: ...)
@@ -2619,7 +2748,6 @@ proc ::ipinfo::finish {id {quiet 0}} {
     }
     set verdict [expr {$bad >= 3 ? "\00304PROXY/VPN/TOR\003" : $bad > 0 ? "\00307SUSPICIOUS (datacenter)\003" : "\00303CLEAN\003"}]
     reply $id [::web::line Security $verdict $flags]
-    unset req($id)
 }
 
 # ----------------------------- COMMANDS -----------------------------
@@ -7826,7 +7954,7 @@ namespace eval ::help {
     variable catalog {
         antiproxy ::antiproxy {antiproxy antiproxy-gate} "Proxy/VPN/Tor check on join; +i gate with invites" {
             {"/msg $bot enter #chan" - "get invited after an IP check (gate channels)"}
-            {"!pcheck <ip|nick>" o "check an IP by hand"}
+            {"!pcheck <ip|nick>" o "check by hand; a detected nick on the channel is kickbanned"}
         }
         ipinfo ::ipinfo {ipinfo} "Full IP lookup: location, network, abuse contact, proxy/VPN/Tor verdict" {
             {"!ip <ip|host>" - "IP information"}
@@ -7911,7 +8039,7 @@ namespace eval ::help {
     # single-file build. Plain ASCII, 72 columns.
     variable guide {
 +----------------------------------------------------------------------+
-|                    eggdrop-quakenet-utils  v1.2.1                    |
+|                    eggdrop-quakenet-utils  v1.2.2                    |
 |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 +----------------------------------------------------------------------+
 
@@ -8216,4 +8344,4 @@ proc ::help::dcc_guide {hand idx text} {
 
 putlog "help.tcl loaded ([llength [::help::loaded]] scripts registered)"
 
-putlog "eggdrop-quakenet-utils.tcl v1.2.1 loaded (18 scripts)"
+putlog "eggdrop-quakenet-utils.tcl v1.2.2 loaded (18 scripts)"

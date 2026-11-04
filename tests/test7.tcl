@@ -87,6 +87,24 @@ set ::out {}
 ::antiproxy::raw315 srv 315 "MiBot evil :End of /WHO list."
 expect "KICK #test evil :Proxy/VPN/Tor not allowed (proxycheck.io: SOCKS5 risk 33 +3*" "not authed: kicked"
 
+# !pcheck on a nick that is on a +antiproxy channel also acts
+proc getchanhost {n {c ""}} {expr {$n eq "ircfiber" ? "~ircfiber@187.14.52.149" : "$n@host.$n.example"}}
+lappend ::chanusers ircfiber
+set ::pc_type VPN
+set ::pc_risk 73
+set ::ia_answer {{"status":"success","countryCode":"US","isp":"Datacamp Limited","proxy":true,"hosting":false}}
+array unset ::antiproxy::cache
+set ::out {}
+::antiproxy::pub_check opnick o@h op #test "ircfiber"
+expect "PRIVMSG #test :Antiproxy :: ircfiber: proxy detected (Score: 4*" "!pcheck reports"
+::antiproxy::raw315 srv 315 "MiBot ircfiber :End of /WHO list."
+expect "KICK #test ircfiber :*" "!pcheck on a nick on the channel kickbans it"
+set ::out {}
+::antiproxy::pub_check opnick o@h op #test "ircfiber"
+::antiproxy::raw354 srv 354 "MiBot 179 ircfiber SomeAccount"
+::antiproxy::raw315 srv 315 "MiBot ircfiber :End of /WHO list."
+check {![llength [lsearch -all -glob $::out "KICK*"]]} "!pcheck: authed with Q, only reported"
+
 rename dnslookup {}
 rename dnslookup_base dnslookup
 set ::antiproxy::allow_authed 0

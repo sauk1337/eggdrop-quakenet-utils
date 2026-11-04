@@ -60,6 +60,35 @@ check {[string match "*Security :: PROXY/VPN/TOR (proxycheck: VPN*risk 66%*opera
 check {[array size ::ipinfo::req] == 0} "no pending lookups"
 check {[llength $::out] == 3 && [llength [lsearch -all -inline -glob $::out "PRIVMSG #test :*"]] == 3} "answers go to the channel, 3 lines"
 
+# A slow source (RDAP) doesn't hold back the lines that are ready
+rename ::web::get ::web::get_sync
+set ::slow {}
+proc ::web::get {url callback {headers {}} {t 0}} {
+    if {[string match *rdap.org* $url]} {lappend ::slow $callback; return}
+    ::web::get_sync $url $callback $headers
+}
+rename putnow putnow_orig
+proc putnow {s args} {emit "NOW $s"}
+set ::out {}
+set ::utimers {}
+::ipinfo::pub_ip pepe p@h * #test 1.2.3.4
+check {[llength $::out] == 1 && [string match "NOW PRIVMSG #test :*IP :: 1.2.3.4*" [plain [lindex $::out 0]]]} "line 1 sent at once (putnow) while RDAP is still loading"
+check {[array size ::ipinfo::req] == 1} "lookup still open"
+eval [lindex $::utimers end]
+set all [plain [join $::out \n]]
+check {[llength $::out] == 3 && [string match "*Network :: ASN: AS3352*" $all] && ![string match "*RDAP:*" $all] && [string match "*Security :: PROXY/VPN/TOR*" $all]} "timeout prints lines 2 and 3 without RDAP"
+check {[array size ::ipinfo::req] == 0} "lookup closed after the timeout"
+{*}[lindex $::slow 0] 1 200 {{"name":"LATE"}}
+check {[llength $::out] == 3} "a late answer prints nothing"
+set ::web::now_sent {}
+set ::out {}
+for {set i 0} {$i < 6} {incr i} {::web::say #test "line $i" now}
+check {[llength [lsearch -all $::out "NOW *"]] == 4 && [llength $::out] == 6} "putnow is capped, the rest goes by putquick"
+rename putnow {}
+rename putnow_orig putnow
+rename ::web::get {}
+rename ::web::get_sync ::web::get
+
 set ::out {}
 ::ipinfo::pub_ip pepe p@h * #test vpn.example.net
 check {[string match "*IP :: 1.2.3.4 (Host: vpn.example.net*" [plain [join $::out]]]} "hostname resolved first"

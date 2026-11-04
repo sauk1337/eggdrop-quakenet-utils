@@ -1,5 +1,5 @@
 # =====================================================================
-#  ipinfo.tcl  v1.2.0  -  Full IP lookup
+#  ipinfo.tcl  v1.2.2  -  Full IP lookup
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -33,7 +33,9 @@ namespace eval ::ipinfo {
     variable pub_flags "-|-"         ;# who can use !ip on IPs/hostnames
     variable nick_flags "o|o"        ;# who can look up nicks
     variable throttle 8              ;# seconds between lookups per user
-    variable timeout 15              ;# seconds before printing what we have
+    variable timeout 6               ;# seconds before printing what we have
+    variable http_timeout 5          ;# seconds per web request
+    variable queue now               ;# now = answer at once, help = slow queue
     variable proxycheck_key ""       ;# empty = reuse antiproxy's key if loaded
     variable dnsbls {
         dnsbl.dronebl.org
@@ -109,7 +111,7 @@ proc ::ipinfo::lookup {target reply requester} {
     variable seq
     variable req
     set id [incr seq]
-    set req($id) [dict create target $target reply $reply pending 0 dnsbl {}]
+    set req($id) [dict create target $target reply $reply sent 0 wait {} dnsbl {}]
 
     if {[is_ip $target]} {
         start $id $target ""
@@ -204,37 +206,39 @@ proc ::ipinfo::start {id ip host} {
         finish $id 1
         return
     }
+    variable http_timeout
     utimer $timeout [list ::ipinfo::finish $id]
-    dict set req($id) pending 1
+    set ms [expr {$http_timeout * 1000}]
+    set rev [rev_ip $ip]
+
+    # Every source is registered before any is started, so an answer that
+    # comes back at once can't print a line before the others are known.
+    set sources {ipapi pc rdap}
+    foreach zone $dnsbls {lappend sources dnsbl:$zone}
+    if {$host eq ""} {lappend sources rdns}
+    dict set req($id) wait $sources
 
     # ip-api.com: location, ASN, ISP, flags (free, HTTP only, 45/min)
-    pending $id
     ::web::get "http://ip-api.com/json/$ip?fields=status,message,continent,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting" \
-        [list ::ipinfo::got_ipapi $id]
+        [list ::ipinfo::got_ipapi $id] {} $ms
 
     # proxycheck.io v2: proxy/VPN type, risk score, provider
     set key [proxycheck_key]
     set url "https://proxycheck.io/v2/$ip?vpn=1&asn=1&risk=1"
     if {$key ne ""} {append url "&key=$key"}
-    pending $id
-    ::web::get $url [list ::ipinfo::got_proxycheck $id]
+    ::web::get $url [list ::ipinfo::got_proxycheck $id] {} $ms
 
     # RDAP: registered network, range, country and abuse contact
-    pending $id
-    ::web::get "https://rdap.org/ip/$ip" [list ::ipinfo::got_rdap $id] {Accept application/rdap+json}
+    ::web::get "https://rdap.org/ip/$ip" [list ::ipinfo::got_rdap $id] {Accept application/rdap+json} $ms
 
     # DNSBLs
-    set rev [rev_ip $ip]
     foreach zone $dnsbls {
-        pending $id
         dnslookup "$rev.$zone" ::ipinfo::got_dnsbl $id $zone
     }
     # Reverse DNS (ip-api also gives one, ours is authoritative)
     if {$host eq ""} {
-        pending $id
         dnslookup $ip ::ipinfo::got_rdns $id
     }
-    done $id
 }
 
 proc ::ipinfo::proxycheck_key {} {
@@ -245,23 +249,51 @@ proc ::ipinfo::proxycheck_key {} {
     return $proxycheck_key
 }
 
-proc ::ipinfo::pending {id} {
-    variable req
-    dict incr req($id) pending
-}
-
-proc ::ipinfo::done {id} {
+# A source has answered (or failed): print every line that is now ready
+proc ::ipinfo::done {id src} {
     variable req
     if {![info exists req($id)]} return
-    dict incr req($id) pending -1
-    if {[dict get $req($id) pending] <= 0} {finish $id}
+    set w [dict get $req($id) wait]
+    dict set req($id) wait [lsearch -all -inline -not -exact $w $src]
+    flush $id 0
+}
+
+# Sources each line needs. Lines go out in order, each as soon as its
+# sources are in, so the first one shows up after ~1 second instead of
+# waiting for the slowest service.
+proc ::ipinfo::needs {line} {
+    switch -- $line {
+        1 {return {ipapi rdns}}
+        2 {return {ipapi pc rdap}}
+        3 {return {pc dnsbl:*}}
+    }
+}
+
+proc ::ipinfo::ready {id line} {
+    variable req
+    set w [dict get $req($id) wait]
+    foreach n [needs $line] {
+        if {[lsearch -glob $w $n] >= 0} {return 0}
+    }
+    return 1
+}
+
+proc ::ipinfo::flush {id force} {
+    variable req
+    while {[info exists req($id)]} {
+        set line [expr {[dict get $req($id) sent] + 1}]
+        if {!$force && ![ready $id $line]} return
+        dict set req($id) sent $line
+        line$line $id
+        if {$line == 3} {unset req($id)}
+    }
 }
 
 proc ::ipinfo::got_ipapi {id ok code body} {
     if {$ok && ![catch {::web::json $body} d] && [::web::dget $d status] eq "success"} {
         set_field $id ipapi $d
     }
-    done $id
+    done $id ipapi
 }
 
 proc ::ipinfo::got_proxycheck {id ok code body} {
@@ -269,7 +301,7 @@ proc ::ipinfo::got_proxycheck {id ok code body} {
         set ip [field $id ip]
         if {[dict exists $d $ip]} {set_field $id pc [dict get $d $ip]}
     }
-    done $id
+    done $id pc
 }
 
 proc ::ipinfo::got_rdap {id ok code body} {
@@ -287,7 +319,7 @@ proc ::ipinfo::got_rdap {id ok code body} {
         set_field $id rdap [dict create name $net range [join $range ", "] \
             country [::web::dget $d country] abuse [abuse_email [::web::dget $d entities]]]
     }
-    done $id
+    done $id rdap
 }
 
 # Looks for an entity with role "abuse" (recursively) and returns its email
@@ -310,12 +342,12 @@ proc ::ipinfo::got_dnsbl {ip host status id zone} {
     if {$status && [string match 127.* $ip]} {
         dict lappend req($id) dnsbl "$zone ($ip)"
     }
-    done $id
+    done $id dnsbl:$zone
 }
 
 proc ::ipinfo::got_rdns {ip host status id} {
     if {$status && $host ne "" && $host ne $ip} {set_field $id host $host}
-    done $id
+    done $id rdns
 }
 
 # ------------------------------ OUTPUT ------------------------------
@@ -326,12 +358,13 @@ proc ::ipinfo::reply {id text} {
         set idx [string range $to 4 end]
         if {[valididx $idx]} {putdcc $idx [stripcodes bcruag $text]}
     } else {
-        ::web::say $to $text
+        ::web::say $to $text $::ipinfo::queue
     }
 }
 
 proc ::ipinfo::yn {v} {expr {$v eq "1" ? "yes" : "no"}}
 
+# Timeout (or quiet = nothing more to say): print whatever is missing
 proc ::ipinfo::finish {id {quiet 0}} {
     variable req
     if {![info exists req($id)]} return
@@ -339,12 +372,22 @@ proc ::ipinfo::finish {id {quiet 0}} {
         unset req($id)
         return
     }
-    set r $req($id)
+    flush $id 1
+}
 
+proc ::ipinfo::data {id} {
+    variable req
+    set r $req($id)
+    foreach k {ipapi pc rdap} {
+        if {![dict exists $r $k]} {dict set r $k {}}
+    }
+    return $r
+}
+
+proc ::ipinfo::line1 {id} {
+    set r [data $id]
     set ip [dict get $r ip]
-    set ia [expr {[dict exists $r ipapi] ? [dict get $r ipapi] : {}}]
-    set pc [expr {[dict exists $r pc] ? [dict get $r pc] : {}}]
-    set rd [expr {[dict exists $r rdap] ? [dict get $r rdap] : {}}]
+    set ia [dict get $r ipapi]
     set host [expr {[dict exists $r host] ? [dict get $r host] : [::web::dget $ia reverse]}]
 
     # Line 1: identity and location
@@ -363,6 +406,13 @@ proc ::ipinfo::finish {id {quiet 0}} {
         }
     }
     reply $id [::web::line IP $ip $f]
+}
+
+proc ::ipinfo::line2 {id} {
+    set r [data $id]
+    set ia [dict get $r ipapi]
+    set pc [dict get $r pc]
+    set rd [dict get $r rdap]
 
     # Line 2: network
     #   Network :: ASN: x | ISP: y | RDAP: name range (cc) | Abuse: mail
@@ -379,6 +429,13 @@ proc ::ipinfo::finish {id {quiet 0}} {
         if {[dict get $rd abuse] ne ""} {lappend parts [::web::lbl Abuse [dict get $rd abuse]]}
     }
     if {[llength $parts]} {reply $id [::web::msg Network [::web::fields $parts]]}
+}
+
+proc ::ipinfo::line3 {id} {
+    set r [data $id]
+    set ip [dict get $r ip]
+    set ia [dict get $r ipapi]
+    set pc [dict get $r pc]
 
     # Line 3: security
     #   Security :: CLEAN (proxycheck: ... | ip-api: ... | Tor exit: no | DNSBL: ...)
@@ -415,7 +472,6 @@ proc ::ipinfo::finish {id {quiet 0}} {
     }
     set verdict [expr {$bad >= 3 ? "\00304PROXY/VPN/TOR\003" : $bad > 0 ? "\00307SUSPICIOUS (datacenter)\003" : "\00303CLEAN\003"}]
     reply $id [::web::line Security $verdict $flags]
-    unset req($id)
 }
 
 # ----------------------------- COMMANDS -----------------------------

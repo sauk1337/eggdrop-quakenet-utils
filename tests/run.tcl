@@ -8,7 +8,7 @@ set ::botnick MiBot
 set ::out {}
 proc emit {s} { lappend ::out $s; puts "  >> $s" }
 proc putlog {s} { puts "  LOG $s" }
-foreach c {putserv puthelp putquick} { proc $c {s args} { emit $s } }
+foreach c {putserv puthelp putquick putnow} { proc $c {s args} { emit $s } }
 proc putkick {chan nick msg} { emit "KICK $chan $nick :$msg" }
 proc putdcc {idx s} { emit "DCC($idx) $s" }
 proc newchanban {chan mask by msg t} { emit "BAN $chan $mask ($t min) $msg" }

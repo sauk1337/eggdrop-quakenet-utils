@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.2 - 2026-11-04
+
+### Changed
+- `ipinfo.tcl` answers much faster. Each of its 3 lines is sent as soon as the services it needs have answered, instead of waiting for the slowest one, and the lines go out at once instead of through the slow help queue. A service that hangs (RDAP often does) no longer holds the answer for 15 seconds: after 6 seconds (`::ipinfo::timeout`) the rest is printed with what is in.
+- `antiproxy.tcl`: `!pcheck <nick>` on a `+antiproxy` channel now applies the action (kickban) when the user is detected, instead of only reporting it. Useful for users who joined while the action was `warn`. Users authed with Q are still only reported.
+- `antiproxy.tcl`: with `action` set to `warn`, the log now says "not acting (action is warn)", so a detection that isn't acted on is clear.
+
+### Added
+- `web.tcl`: `::web::say target text ?queue?` chooses the output queue (`help`, `serv`, `quick` or `now`). `now` uses `putnow`, capped at 4 lines every 4 seconds so the bot can't flood itself off. `::web::get` takes an optional timeout.
+- `antiproxy.tcl` runs on its own, without web.tcl: it brings a minimal copy of the output style. A standalone package (script, settings file, README) is published separately as eggdrop-antiproxy.
+
 ## 1.2.1 - 2026-10-30
 
 ### Fixed
