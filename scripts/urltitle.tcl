@@ -1,5 +1,5 @@
 # =====================================================================
-#  urltitle.tcl  v1.2.0  -  Titles of links pasted on the channel
+#  urltitle.tcl  v1.2.3  -  Titles of links pasted on the channel
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -260,7 +260,10 @@ proc ::urltitle::extract_title {html} {
     set t ""
     if {![regexp -nocase {<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']} $html -> t] &&
         ![regexp -nocase {<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']} $html -> t]} {
-        regexp -nocase {<title[^>]*>(.*?)</title>} $html -> t
+        # Not {<title[^>]*>(.*?)</title>}: in Tcl the first quantifier sets the
+        # greediness of the whole match, so that one runs to the *last* </title>
+        # (SVG tooltips, icons...). [^<]* stops at the first one.
+        regexp -nocase {<title(?:\s[^>]*)?>([^<]*)</title>} $html -> t
     }
     return [clean [entities $t]]
 }

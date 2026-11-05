@@ -1,5 +1,5 @@
 ########################################################################
-#  eggdrop-quakenet-utils.tcl  v1.2.2  -  every script in one file
+#  eggdrop-quakenet-utils.tcl  v1.2.3  -  every script in one file
 ########################################################################
 #
 #  GENERATED FILE: edit the scripts in scripts/ and run
@@ -14,7 +14,7 @@
 #  License: MIT (see LICENSE).
 #
 #  +----------------------------------------------------------------------+
-#  |                    eggdrop-quakenet-utils  v1.2.2                    |
+#  |                    eggdrop-quakenet-utils  v1.2.3                    |
 #  |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 #  +----------------------------------------------------------------------+
 #
@@ -3759,7 +3759,7 @@ putlog "youtube.tcl loaded ([expr {$::youtube::key ne "" ? "Data API v3" : "key-
 ########################################################################
 
 # =====================================================================
-#  urltitle.tcl  v1.2.0  -  Titles of links pasted on the channel
+#  urltitle.tcl  v1.2.3  -  Titles of links pasted on the channel
 # ---------------------------------------------------------------------
 #  Part of eggdrop-quakenet-utils (Eggdrop 1.9+ / Tcl 8.6, Linux)
 #  License: MIT (see LICENSE)
@@ -4020,7 +4020,10 @@ proc ::urltitle::extract_title {html} {
     set t ""
     if {![regexp -nocase {<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']} $html -> t] &&
         ![regexp -nocase {<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']} $html -> t]} {
-        regexp -nocase {<title[^>]*>(.*?)</title>} $html -> t
+        # Not {<title[^>]*>(.*?)</title>}: in Tcl the first quantifier sets the
+        # greediness of the whole match, so that one runs to the *last* </title>
+        # (SVG tooltips, icons...). [^<]* stops at the first one.
+        regexp -nocase {<title(?:\s[^>]*)?>([^<]*)</title>} $html -> t
     }
     return [clean [entities $t]]
 }
@@ -8039,7 +8042,7 @@ namespace eval ::help {
     # single-file build. Plain ASCII, 72 columns.
     variable guide {
 +----------------------------------------------------------------------+
-|                    eggdrop-quakenet-utils  v1.2.2                    |
+|                    eggdrop-quakenet-utils  v1.2.3                    |
 |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 +----------------------------------------------------------------------+
 
@@ -8344,4 +8347,4 @@ proc ::help::dcc_guide {hand idx text} {
 
 putlog "help.tcl loaded ([llength [::help::loaded]] scripts registered)"
 
-putlog "eggdrop-quakenet-utils.tcl v1.2.2 loaded (18 scripts)"
+putlog "eggdrop-quakenet-utils.tcl v1.2.3 loaded (18 scripts)"

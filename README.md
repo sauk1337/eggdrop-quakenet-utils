@@ -98,7 +98,7 @@ chmod 600 ~/mibot/secrets.tcl
 
 ```
 +----------------------------------------------------------------------+
-|                    eggdrop-quakenet-utils  v1.2.2                    |
+|                    eggdrop-quakenet-utils  v1.2.3                    |
 |        Utility bot for QuakeNet - Eggdrop 1.9/1.10 - Tcl 8.6         |
 +----------------------------------------------------------------------+
 
