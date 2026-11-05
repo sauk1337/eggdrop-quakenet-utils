@@ -10,6 +10,14 @@ set t [::urltitle::extract_title "<html><head><title>  Hola &amp; adi&oacute;s &
 check {$t eq "Hola & adiós – café"} "title + entities ($t)"
 set t [::urltitle::extract_title {<meta property="og:title" content="OG Title"><title>x</title>}]
 check {$t eq "OG Title"} "og:title"
+# Pages with SVG charts have one <title> per tooltip after the real one:
+# only the first <title> is the page title.
+set t [::urltitle::extract_title {<html><head><title>Overview · #uptime</title><link rel="stylesheet" href="style.css"></head><body><svg><rect><title>3d 4h</title></rect><rect><title>1d 2h</title></rect></svg></body>}]
+check {$t eq "Overview · #uptime"} "first <title> only, not up to the last one ($t)"
+set t [::urltitle::extract_title {<title data-rh="true">Attr title</title><svg><title>icon</title></svg>}]
+check {$t eq "Attr title"} "<title> with attributes ($t)"
+set t [::urltitle::extract_title {<titlebar>no</titlebar><title>Real</title>}]
+check {$t eq "Real"} "ignores tags that only start with <title ($t)"
 set t [::urltitle::json_str {{"title":"Rick á \"Roll\"","author_name":"X"}} title]
 check {$t eq {Rick á "Roll"}} "json_str ($t)"
 set ok 1

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3 - 2026-11-05
+
+### Fixed
+- `urltitle.tcl`: on pages with more than one `<title>` (SVG charts and icons have one per tooltip) the title ran from the first `<title>` to the *last* `</title>`, so the bot printed a long piece of HTML instead of the title. In Tcl the first quantifier of a regular expression sets the greediness of the whole match, which made `(.*?)` greedy; the title is now read up to the first `</title>`. Tags that only start with `<title`, like `<titlebar>`, are no longer mistaken for it.
+
 ## 1.2.2 - 2026-11-04
 
 ### Changed
