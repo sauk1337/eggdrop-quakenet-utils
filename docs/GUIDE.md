@@ -68,6 +68,9 @@ Checks the IP of everyone who joins and kickbans proxies, VPN abuse and Tor.
 |---|---|---|
 | `/msg <bot> enter #chan` | everyone | Ask for an invite on a gate channel |
 | `!pcheck <ip\|host\|nick>` | ops | Check by hand and show the score. A nick on a `+antiproxy` channel is also kickbanned if detected (users authed with Q are only reported). |
+| `!pwhite add\|del\|list [mask]` | global o | Whitelist, same as `.pwhite`. Answered by notice. |
+| `!pcache [clear]` | global o | Blocked IPs in the cache (5 at most) and the totals, or empty the cache. Answered by notice. |
+| `!pstats` | ops | Counters: checked, blocked, clean, Tor nodes, whitelist size. |
 
 **How it decides.** Each method adds points. At 3 points (`threshold`) the bot acts.
 
@@ -103,7 +106,7 @@ What that means in practice:
 
 - A legitimate user banned? On the partyline:
   1. `.pcheck <ip>` shows why.
-  2. `.pwhite add *!*@their.host` lets them in for good.
+  2. `.pwhite add *!*@their.host` (or `!pwhite add` on IRC) lets them in for good.
   3. `.pcache clear` forgets old results.
   4. `.-chanban #chan <mask>` removes the ban.
 - For a fully verified channel, combine it with `+r` (Q account required).

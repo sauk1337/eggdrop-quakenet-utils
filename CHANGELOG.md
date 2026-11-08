@@ -8,6 +8,7 @@
 - `antiproxy.tcl`: with `action` set to `warn`, the log now says "not acting (action is warn)", so a detection that isn't acted on is clear.
 
 ### Added
+- `antiproxy.tcl`: the partyline commands can also be used in the channel: `!pwhite add|del|list [mask]` and `!pcache [clear]` (global `o`, answered by notice; `!pcache` shows up to 5 blocked IPs and the totals) and `!pstats` (ops, in the channel).
 - `web.tcl`: `::web::say target text ?queue?` chooses the output queue (`help`, `serv`, `quick` or `now`). `now` uses `putnow`, capped at 4 lines every 4 seconds so the bot can't flood itself off. `::web::get` takes an optional timeout.
 - `antiproxy.tcl` runs on its own, without web.tcl: it brings a minimal copy of the output style. A standalone package (script, settings file, README) is published separately as eggdrop-antiproxy.
 

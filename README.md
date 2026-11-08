@@ -24,7 +24,7 @@ The tag is orange and bold, the title bold, the labels blue and the separators o
 | Script | What it does | Enable with | Main commands |
 |---|---|---|---|
 | `qauth.tcl` | Q auth (CHALLENGEAUTH) and +x before joining | — | `.qauth` |
-| `antiproxy.tcl` | Proxy/VPN/Tor detection by score; invite gate for +i channels | `+antiproxy` `+antiproxy-gate` | `/msg bot enter #chan`, `!pcheck` |
+| `antiproxy.tcl` | Proxy/VPN/Tor detection by score; invite gate for +i channels | `+antiproxy` `+antiproxy-gate` | `/msg bot enter #chan`, `!pcheck`, `!pwhite`, `!pcache`, `!pstats` |
 | `ipinfo.tcl` | Location, ASN, RDAP range and abuse contact, proxy/VPN/Tor/DNSBL verdict | `+ipinfo` | `!ip` |
 | `utils.tcl` | Weather, forecast, time, currency, crypto, countries, DNS, calculator, quotes | `+utils` | `!weather` `!time` `!convert` `!crypto` `!country` `!dns` `!calc` `!quote` |
 | `youtube.tcl` | YouTube links (duration, views, live, Shorts, playlists) and search | `+youtube` | `!yt` |
@@ -132,6 +132,7 @@ chmod 600 ~/mibot/secrets.tcl
  ON IRC (channel ops)
    !op !deop !voice !devoice !kick !kb !ban !unban !topic
    !pcheck <ip|nick>   !ip <nick>       proxy check, IP of a user
+   !pwhite !pcache !pstats              antiproxy whitelist, cache, counters
    !feed add|del|pause|filter ...       manage feeds
    !gh add|del|filter|check ...         manage tracked GitHub profiles
    !cd add|del|edit|alerts ...          manage countdowns

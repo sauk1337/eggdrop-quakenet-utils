@@ -39,6 +39,9 @@
 #    !pcheck <ip|host|nick>            check by hand (ops). A nick on a
 #                                      +antiproxy channel is also kickbanned
 #                                      if detected (unless authed with Q)
+#    !pwhite add|del|list [mask]       whitelist (global o, by notice)
+#    !pcache [clear]                   cache: blocked IPs / empty it (global o)
+#    !pstats                           counters (ops)
 #  PARTYLINE
 #    .pcheck <ip|host|nick>  .pwhite add|del|list [mask]  .pcache [clear]  .pstats
 # =====================================================================
@@ -898,63 +901,125 @@ proc ::antiproxy::pub_check {nick uhost hand chan text} {
     return 1
 }
 
-bind dcc o pwhite ::antiproxy::dcc_white
-proc ::antiproxy::dcc_white {hand idx text} {
+# .pwhite / .pcache / .pstats and their public twins !pwhite / !pcache /
+# !pstats share one proc each. "to" is where the answer goes (see reply);
+# "p" is the command prefix shown in usage lines ("." or "!").
+# Public answers go by notice to whoever asked, except !pstats.
+
+proc ::antiproxy::entries {n} {expr {$n == 1 ? "1 entry" : "$n entries"}}
+
+proc ::antiproxy::cmd_white {to p text} {
     variable white
     lassign [split [string trim $text]] sub mask
     switch -- [string tolower $sub] {
         add {
-            if {$mask eq ""} {putdcc $idx "Usage: .pwhite add <mask|ip>"; return 0}
+            if {$mask eq ""} {
+                reply $to [::web::msg Antiproxy "Usage: [::web::b "${p}pwhite add <mask|ip>"]"]
+                return 0
+            }
             if {[lsearch -exact $white $mask] < 0} {lappend white $mask; white_save}
-            putdcc $idx "Added to the whitelist: $mask"
+            reply $to [::web::msg Antiproxy "Added to the whitelist: [::web::b $mask]"]
         }
         del {
             set i [lsearch -exact $white $mask]
-            if {$i < 0} {putdcc $idx "Not in the whitelist: $mask"; return 0}
+            if {$mask eq "" || $i < 0} {
+                reply $to [::web::msg Antiproxy "Not in the whitelist: [::web::b $mask]"]
+                return 0
+            }
             set white [lreplace $white $i $i]
             white_save
-            putdcc $idx "Removed from the whitelist: $mask"
+            reply $to [::web::msg Antiproxy "Removed from the whitelist: [::web::b $mask]"]
         }
         list {
-            if {![llength $white]} {putdcc $idx "The whitelist is empty."}
-            foreach m $white {putdcc $idx "  $m"}
+            if {![llength $white]} {
+                reply $to [::web::msg Antiproxy "The whitelist is empty."]
+                return 1
+            }
+            if {[lindex $to 0] eq "dcc"} {
+                foreach m $white {reply $to "  $m"}
+                return 1
+            }
+            # On IRC: several masks per line, a few lines at most
+            set line {}
+            set lines 0
+            foreach m $white {
+                lappend line $m
+                if {[string length [join $line " "]] > 300} {
+                    reply $to [::web::msg Whitelist [join $line " "]]
+                    set line {}
+                    if {[incr lines] == 4} break
+                }
+            }
+            if {[llength $line] && $lines < 4} {
+                reply $to [::web::msg Whitelist [join $line " "]]
+            }
+            reply $to [::web::msg Whitelist [entries [llength $white]]]
         }
         default {
-            putdcc $idx "Usage: .pwhite add|del|list \[mask\]"
+            reply $to [::web::msg Antiproxy "Usage: [::web::b "${p}pwhite add|del|list \[mask\]"]"]
             return 0
         }
     }
     return 1
 }
 
-bind dcc o pcache ::antiproxy::dcc_cache
-proc ::antiproxy::dcc_cache {hand idx text} {
+proc ::antiproxy::cmd_cache {to p text} {
     variable cache
     if {[string tolower [string trim $text]] eq "clear"} {
         array unset cache
-        putdcc $idx "Cache cleared."
+        reply $to [::web::msg Antiproxy "Cache cleared."]
         return 1
     }
-    set n 0
-    foreach ip [lsort [array names cache]] {
-        lassign $cache($ip) expire verdict reasons
-        putdcc $idx [format "  %-39s %-5s %s" $ip $verdict [join $reasons ", "]]
-        incr n
+    set ips [lsort [array names cache]]
+    if {[lindex $to 0] eq "dcc"} {
+        foreach ip $ips {
+            lassign $cache($ip) expire verdict reasons
+            reply $to [format "  %-39s %-5s %s" $ip $verdict [join $reasons ", "]]
+        }
+    } else {
+        # On IRC: only blocked IPs, 5 at most
+        set shown 0
+        foreach ip $ips {
+            lassign $cache($ip) expire verdict reasons
+            if {$verdict ne "bad"} continue
+            reply $to [::web::line Cache $ip [list [::web::lbl Reasons [join $reasons ", "]]]]
+            if {[incr shown] == 5} break
+        }
     }
-    putdcc $idx "$n cache entries (.pcache clear to empty it)"
+    set bad 0
+    foreach ip $ips {if {[lindex $cache($ip) 1] eq "bad"} {incr bad}}
+    reply $to [::web::line Cache [entries [llength $ips]] [list \
+        [::web::lbl Blocked $bad] [::web::lbl Empty "[::web::b "${p}pcache clear"]"]]]
     return 1
 }
 
-bind dcc o pstats ::antiproxy::dcc_stats
-proc ::antiproxy::dcc_stats {hand idx text} {
+proc ::antiproxy::cmd_stats {to} {
     variable stats
     variable torlist
     variable white
     variable checks
-    putdcc $idx "antiproxy: checked $stats(checked), blocked $stats(blocked), clean $stats(clean), from cache $stats(cached)"
-    putdcc $idx "antiproxy: Tor nodes [array size torlist], whitelist [llength $white], in progress [array size checks]"
+    reply $to [::web::line Antiproxy Stats [list \
+        [::web::lbl Checked $stats(checked)] [::web::lbl Blocked $stats(blocked)] \
+        [::web::lbl Clean $stats(clean)] [::web::lbl "From cache" $stats(cached)] \
+        [::web::lbl "Tor nodes" [array size torlist]] [::web::lbl Whitelist [llength $white]] \
+        [::web::lbl "In progress" [array size checks]]]]
     return 1
 }
+
+bind dcc o pwhite ::antiproxy::dcc_white
+proc ::antiproxy::dcc_white {hand idx text} {cmd_white [list dcc $idx] . $text}
+bind dcc o pcache ::antiproxy::dcc_cache
+proc ::antiproxy::dcc_cache {hand idx text} {cmd_cache [list dcc $idx] . $text}
+bind dcc o pstats ::antiproxy::dcc_stats
+proc ::antiproxy::dcc_stats {hand idx text} {cmd_stats [list dcc $idx]}
+
+# Same flags as the partyline: the whitelist and the cache are global
+bind pub o !pwhite ::antiproxy::pub_white
+proc ::antiproxy::pub_white {nick uhost hand chan text} {cmd_white [list notice $nick] ! $text}
+bind pub o !pcache ::antiproxy::pub_cache
+proc ::antiproxy::pub_cache {nick uhost hand chan text} {cmd_cache [list notice $nick] ! $text}
+bind pub o|o !pstats ::antiproxy::pub_stats
+proc ::antiproxy::pub_stats {nick uhost hand chan text} {cmd_stats [list chan $chan]}
 
 # --------------------------- MAINTENANCE ---------------------------
 

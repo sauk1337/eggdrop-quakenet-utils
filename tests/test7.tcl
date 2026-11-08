@@ -105,6 +105,42 @@ set ::out {}
 ::antiproxy::raw315 srv 315 "MiBot ircfiber :End of /WHO list."
 check {![llength [lsearch -all -glob $::out "KICK*"]]} "!pcheck: authed with Q, only reported"
 
+puts "== antiproxy public commands"
+set ::antiproxy::datadir [file join [pwd] [file dirname [info script]]]
+set white_saved $::antiproxy::white
+set ::antiproxy::white {}
+set ::out {}
+::antiproxy::pub_white opnick o@h op #test "add *!*@bnc.example.net"
+expect "NOTICE opnick :Antiproxy :: Added to the whitelist: *!*@bnc.example.net" "!pwhite add, by notice"
+check {"*!*@bnc.example.net" in $::antiproxy::white} "!pwhite add stores the mask"
+::antiproxy::pub_white opnick o@h op #test "list"
+check {[llength [lsearch -all -glob [lmap l $::out {plain $l}] "NOTICE opnick :Whitelist :: *bnc.example.net*"]] == 1} "!pwhite list"
+::antiproxy::pub_white opnick o@h op #test "del *!*@bnc.example.net"
+expect "*Removed from the whitelist: *!*@bnc.example.net" "!pwhite del"
+::antiproxy::pub_white opnick o@h op #test "del nope"
+expect "*Not in the whitelist: nope" "!pwhite del unknown mask"
+::antiproxy::pub_white opnick o@h op #test ""
+expect "*Usage: !pwhite add|del|list*" "!pwhite usage"
+set ::out {}
+::antiproxy::dcc_white op 7 "list"
+expect "DCC(7) Antiproxy :: The whitelist is empty." "partyline .pwhite still works, plain text"
+file delete [file join $::antiproxy::datadir whitelist.txt]
+set ::antiproxy::white $white_saved
+
+array unset ::antiproxy::cache
+::antiproxy::cache_put 9.9.9.9 bad {{DNSBL x +3}} 3
+::antiproxy::cache_put 8.8.8.8 clean {} 0
+set ::out {}
+::antiproxy::pub_cache opnick o@h op #test ""
+check {[llength $::out] == 2} "!pcache: blocked IPs and a summary"
+check {[string match "NOTICE opnick :Cache :: 9.9.9.9 (Reasons: DNSBL x +3)" [plain [lindex $::out 0]]]} "!pcache lists the blocked IP only"
+expect "NOTICE opnick :Cache :: 2 entries (Blocked: 1 | Empty: !pcache clear)" "!pcache summary"
+::antiproxy::pub_cache opnick o@h op #test "clear"
+check {[array size ::antiproxy::cache] == 0} "!pcache clear"
+set ::out {}
+::antiproxy::pub_stats opnick o@h op #test ""
+expect "PRIVMSG #test :Antiproxy :: Stats (Checked: *Blocked: *Tor nodes: *Whitelist: *" "!pstats in the channel"
+
 rename dnslookup {}
 rename dnslookup_base dnslookup
 set ::antiproxy::allow_authed 0

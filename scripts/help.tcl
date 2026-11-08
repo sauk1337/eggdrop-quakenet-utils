@@ -39,6 +39,9 @@ namespace eval ::help {
         antiproxy ::antiproxy {antiproxy antiproxy-gate} "Proxy/VPN/Tor check on join; +i gate with invites" {
             {"/msg $bot enter #chan" - "get invited after an IP check (gate channels)"}
             {"!pcheck <ip|nick>" o "check by hand; a detected nick on the channel is kickbanned"}
+            {"!pwhite add|del|list [mask]" o "antiproxy whitelist (answer by notice)"}
+            {"!pcache [clear]" o "cached blocked IPs, or empty the cache"}
+            {"!pstats" o "antiproxy counters"}
         }
         ipinfo ::ipinfo {ipinfo} "Full IP lookup: location, network, abuse contact, proxy/VPN/Tor verdict" {
             {"!ip <ip|host>" - "IP information"}
@@ -157,6 +160,7 @@ namespace eval ::help {
  ON IRC (channel ops)
    !op !deop !voice !devoice !kick !kb !ban !unban !topic
    !pcheck <ip|nick>   !ip <nick>       proxy check, IP of a user
+   !pwhite !pcache !pstats              antiproxy whitelist, cache, counters
    !feed add|del|pause|filter ...       manage feeds
    !gh add|del|filter|check ...         manage tracked GitHub profiles
    !cd add|del|edit|alerts ...          manage countdowns
